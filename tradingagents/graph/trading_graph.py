@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
@@ -119,6 +120,37 @@ class TradingAgentsGraph:
         self.propagator = Propagator()
         self.reflector = Reflector(self.quick_thinking_llm)
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
+
+        # --- Integration components (RFC-001) ---
+        self.notifier = None
+        if self.config.get("telegram_enabled"):
+            from tradingagents.integrations.telegram_notifier import TelegramNotifier
+            self.notifier = TelegramNotifier(
+                bot_token=self.config.get("telegram_bot_token"),
+                chat_id=self.config.get("telegram_chat_id"),
+            )
+
+        self.pinecone_memory = None
+        if self.config.get("pinecone_enabled") and self.config.get("pinecone_api_key"):
+            try:
+                from tradingagents.integrations.pinecone_memory import PineconeMemory
+                ollama_url = self.config.get("backend_url") or "http://localhost:11434"
+                self.pinecone_memory = PineconeMemory(
+                    api_key=self.config["pinecone_api_key"],
+                    index_name=self.config.get("pinecone_index", "trading-memory"),
+                    ollama_base_url=ollama_url,
+                )
+                logger.info("Pinecone memory initialized (index=%s)", self.config.get("pinecone_index"))
+            except Exception:
+                logger.exception("Failed to initialize Pinecone memory — continuing without it")
+
+        self.order_queue = None
+        if self.config.get("execution_enabled"):
+            from tradingagents.integrations.redis_queue import RedisOrderQueue
+            self.order_queue = RedisOrderQueue(
+                redis_url=self.config.get("redis_url", "redis://localhost:6379/0"),
+                fallback_dir=self.config.get("order_output_dir", "./orders"),
+            )
 
         # State tracking
         self.curr_state = None
@@ -302,8 +334,29 @@ class TradingAgentsGraph:
 
     def _run_graph(self, company_name, trade_date):
         """Execute the graph and write the resulting state to disk and memory log."""
+        start_time = time.time()
+
+        # Notify pipeline start
+        if self.notifier:
+            self.notifier.sync_send_pipeline_start(
+                ticker=company_name, trade_date=str(trade_date)
+            )
+
         # Initialize state — inject memory log context for PM.
         past_context = self.memory_log.get_past_context(company_name)
+
+        # Augment with Pinecone semantic memory if available
+        if self.pinecone_memory is not None:
+            try:
+                semantic_ctx = self.pinecone_memory.get_context_for_agent(
+                    ticker=company_name,
+                    query=f"Trading analysis and decision for {company_name}",
+                )
+                if semantic_ctx:
+                    past_context += "\n\n" + semantic_ctx
+            except Exception:
+                logger.warning("Pinecone context retrieval failed — continuing without it")
+
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date, past_context=past_context
         )
@@ -345,7 +398,16 @@ class TradingAgentsGraph:
                 self.config["data_cache_dir"], company_name, str(trade_date)
             )
 
-        return final_state, self.process_signal(final_state["final_trade_decision"])
+        # --- Post-processing: validate & notify (RFC-001 Phase 1) ---
+        decision_text = final_state["final_trade_decision"]
+        rating = self.process_signal(decision_text)
+        duration = time.time() - start_time
+
+        self._post_process_decision(
+            company_name, trade_date, decision_text, rating, duration
+        )
+
+        return final_state, rating
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
@@ -392,3 +454,100 @@ class TradingAgentsGraph:
     def process_signal(self, full_signal):
         """Process a signal to extract the core decision."""
         return self.signal_processor.process_signal(full_signal)
+
+    # ------------------------------------------------------------------
+    # RFC-001 Phase 1: Post-processing (validation + notifications)
+    # ------------------------------------------------------------------
+
+    def _post_process_decision(
+        self,
+        company_name: str,
+        trade_date: str,
+        decision_text: str,
+        rating: str,
+        duration: float,
+    ) -> None:
+        """Validate the final decision and send notifications.
+
+        This is the bridge between TradingAgents' analysis output and the
+        downstream execution layer.  It runs after every successful
+        ``propagate()`` call.
+        """
+        # 1. Notify pipeline completion
+        if self.notifier:
+            self.notifier.sync_send_pipeline_complete(
+                ticker=company_name, rating=rating, duration_seconds=duration
+            )
+
+        # 2. Store in Pinecone for semantic memory (dual-write)
+        if self.pinecone_memory is not None:
+            try:
+                self.pinecone_memory.store_decision(
+                    ticker=company_name,
+                    date=str(trade_date),
+                    decision=decision_text,
+                    rating=rating,
+                )
+            except Exception:
+                logger.warning("Pinecone store failed — decision still saved in markdown log")
+
+        # 3. If rating is Hold, notify and return early
+        if rating in ("Hold",):
+            if self.notifier:
+                self.notifier.sync_send_hold_decision(
+                    ticker=company_name, rating=rating
+                )
+            return
+
+        # 4. Attempt to build a validated trade order
+        if not self.config.get("execution_enabled"):
+            logger.info(
+                "Execution disabled — skipping trade validation for %s (%s).",
+                company_name,
+                rating,
+            )
+            return
+
+        from tradingagents.integrations.trade_validator import parse_decision_to_order
+
+        order = parse_decision_to_order(
+            ticker=company_name,
+            portfolio_decision=decision_text,
+            llm=self.quick_thinking_llm,
+            config=self.config,
+        )
+
+        if order is None:
+            logger.warning(
+                "Trade validation failed for %s — no order generated.",
+                company_name,
+            )
+            if self.notifier:
+                self.notifier.sync_send_validation_failed(
+                    ticker=company_name,
+                    error="Could not extract valid trade parameters from decision.",
+                )
+            return
+
+        # 5. Push validated order to Redis queue (falls back to file)
+        if self.order_queue is not None:
+            order_id = self.order_queue.push_order(order.model_dump())
+            logger.info("Order queued via Redis: %s → %s", company_name, order_id)
+        else:
+            from tradingagents.integrations.trade_validator import write_order_to_queue
+            order_dir = self.config.get("order_output_dir", "./orders")
+            write_order_to_queue(order, order_dir)
+
+        # 6. Notify successful validation
+        if self.notifier:
+            self.notifier.sync_send_trade_validated(
+                ticker=order.ticker,
+                side=order.side.value,
+                quantity=order.quantity,
+                confidence=order.confidence,
+                reasoning=order.reasoning,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit,
+                limit_price=order.limit_price,
+            )
+

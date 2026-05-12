@@ -1,35 +1,114 @@
-services:
-  tradingagents:
-    build: .
-    env_file:
-      - .env
-    volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-    tty: true
-    stdin_open: true
+################################################################################
+# TradingAgents — Full System Docker Compose
+#
+# Services:
+#   1. ollama       — Local LLM inference (Qwen3 8B / Gemma4 12B)
+#   2. redis        — Order queue (Redis Streams) + caching
+#   3. tradingagents — Analysis brain (LangGraph + 12 agent nodes)
+#   4. executor     — Trade execution (polls Redis → Alpaca API)
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up ollama redis    # Infrastructure only
+#   docker compose run tradingagents  # Run analysis interactively
+#
+# M3 Pro 18GB Memory Budget:
+#   ollama (qwen3:8b)   ~5.5 GB
+#   redis               ~0.1 GB
+#   tradingagents        ~0.5 GB
+#   macOS + Docker       ~4.0 GB
+#   Total               ~10 GB (safe headroom)
+################################################################################
 
+services:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Ollama — Local LLM Inference
+  # ──────────────────────────────────────────────────────────────────────────
   ollama:
     image: ollama/ollama:latest
+    container_name: tradingagents-ollama
+    ports:
+      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    profiles:
-      - ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
-  tradingagents-ollama:
-    build: .
-    env_file:
-      - .env
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Redis — Order Queue & Cache
+  # ──────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tradingagents-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. TradingAgents — Autonomous Analysis Brain
+  # ──────────────────────────────────────────────────────────────────────────
+  tradingagents:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradingagents-brain
+    env_file: .env
     environment:
       - LLM_PROVIDER=ollama
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - REDIS_URL=redis://redis:6379/0
+      - SCAN_INTERVAL_MINUTES=${SCAN_INTERVAL_MINUTES:-60}
+      - MAX_TICKERS_PER_SCAN=${MAX_TICKERS_PER_SCAN:-3}
+    command: python run_autonomous.py
     volumes:
       - tradingagents_data:/home/appuser/.tradingagents
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     tty: true
     stdin_open: true
+    restart: unless-stopped  # auto-restart for daemon mode
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Executor — Trade Execution (Alpaca)
+  # ──────────────────────────────────────────────────────────────────────────
+  executor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradingagents-executor
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    command: python -m tradingagents.integrations.lumibot_executor --paper --redis-url redis://redis:6379/0
+    volumes:
+      - tradingagents_data:/home/appuser/.tradingagents
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     profiles:
-      - ollama
+      - executor  # Only start when explicitly requested
 
 volumes:
-  tradingagents_data:
   ollama_data:
+    driver: local
+  redis_data:
+    driver: local
+  tradingagents_data:
+    driver: local

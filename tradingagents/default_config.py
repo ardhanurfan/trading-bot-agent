@@ -47,4 +47,45 @@ DEFAULT_CONFIG = {
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
     },
+    # ===================================================================
+    # Integration Settings (RFC-001)
+    # All integrations are opt-in and disabled by default.
+    # ===================================================================
+    # Telegram Notifications
+    "telegram_enabled": False,
+    "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
+    "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", ""),
+    # Trade Validation & Execution
+    "execution_enabled": False,          # When True, validated orders are written to the order queue
+    "execution_mode": "paper",           # "paper" or "live"
+    "order_output_dir": os.path.join(_TRADINGAGENTS_HOME, "orders"),
+    "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    "min_confidence_threshold": 0.6,     # Trades below this confidence are rejected
+    "max_position_pct": 0.05,            # Max 5% of portfolio per trade
+    "max_total_exposure": 0.20,          # Max 20% total exposure
+    # Alpaca Brokerage (Phase 3)
+    "alpaca_api_key": os.getenv("ALPACA_API_KEY", ""),
+    "alpaca_secret_key": os.getenv("ALPACA_SECRET_KEY", ""),
+    # Pinecone RAG Memory
+    "pinecone_enabled": False,
+    "pinecone_api_key": os.getenv("PINECONE_API_KEY", ""),
+    "pinecone_index": "trading-memory",
+    # ===================================================================
+    # Autonomous Mode (v5.0)
+    # Scanner + continuous loop during market hours
+    # ===================================================================
+    "autonomous_enabled": False,
+    "scan_interval_minutes": 60,        # Minutes between scan cycles
+    "max_tickers_per_scan": 3,          # Max tickers to deeply analyze per cycle
+    "ticker_cooldown_hours": 4,         # Hours before re-analyzing a ticker
+    "portfolio_check_minutes": 15,      # Minutes between portfolio checks
+    "market_timezone": "US/Eastern",
+    "market_open": "09:30",
+    "market_close": "16:00",
+    "pre_market_hour": 6,
+    # Scanner settings
+    "scanner_min_price": 5.0,           # Min stock price ($)
+    "scanner_min_volume": 500_000,      # Min daily volume
+    "scanner_universe": "default",      # "default", "custom"
+    "scanner_custom_watchlist": [],      # Custom ticker list when universe="custom"
 }
