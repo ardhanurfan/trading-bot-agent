@@ -28,11 +28,13 @@
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News
-- [2026-04] **TradingAgents v0.2.4** released with structured-output agents (Research Manager, Trader, Portfolio Manager), LangGraph checkpoint resume, persistent decision log, DeepSeek/Qwen/GLM/Azure provider support, Docker, and a Windows UTF-8 encoding fix. See [CHANGELOG.md](CHANGELOG.md) for the full list.
-- [2026-03] **TradingAgents v0.2.3** released with multi-language support, GPT-5.4 family models, unified model catalog, backtesting date fidelity, and proxy support.
-- [2026-03] **TradingAgents v0.2.2** released with GPT-5.4/Gemini 3.1/Claude 4.6 model coverage, five-tier rating scale, OpenAI Responses API, Anthropic effort control, and cross-platform stability.
-- [2026-02] **TradingAgents v0.2.0** released with multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and improved system architecture.
-- [2026-01] **Trading-R1** [Technical Report](https://arxiv.org/abs/2509.11420) released, with [Terminal](https://github.com/TauricResearch/Trading-R1) expected to land soon.
+- [2026-05] **TradingAgents v5.0 (Autonomous Edition)** released! Transitioned from a manual CLI tool to a fully autonomous, continuous trading daemon.
+  - **Ticker Scanner Agent**: Discovers opportunities autonomously using yfinance + LLM ranking.
+  - **Continuous Daemon**: Market-hours-aware scheduling loop (`run_autonomous.py`).
+  - **Docker Compose Stack**: Fully containerized with `ollama`, `redis`, `tradingagents` brain, and `executor`.
+  - **Live Integrations**: Pinecone RAG Memory, Alpaca Execution, and Telegram Alerting.
+- [2026-04] **TradingAgents v0.2.4** released with structured-output agents (Research Manager, Trader, Portfolio Manager).
+- [2026-03] **TradingAgents v0.2.3** released with multi-language support, GPT-5.4 family models.
 
 <div align="center">
 <a href="https://www.star-history.com/#TauricResearch/TradingAgents&Date">
@@ -44,93 +46,84 @@
 </a>
 </div>
 
-> 🎉 **TradingAgents** officially released! We have received numerous inquiries about the work, and we would like to express our thanks for the enthusiasm in our community.
->
-> So we decided to fully open-source the framework. Looking forward to building impactful projects with you!
+> 🎉 **TradingAgents (Autonomous Edition)** is now running 24/7! We have upgraded the original framework with a full autonomous pipeline.
 
 <div align="center">
 
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
+🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & Docker](#installation-and-docker) | 🤖 [Autonomous Loop](#autonomous-mode) | 📦 [Package Usage](#tradingagents-package)
 
 </div>
 
 ## TradingAgents Framework
 
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. By deploying specialized LLM-powered agents: from fundamental analysts, sentiment experts, and technical analysts, to trader, risk management team, the platform collaboratively evaluates market conditions and informs trading decisions. Moreover, these agents engage in dynamic discussions to pinpoint the optimal strategy.
+TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. In **v5.0**, we introduced the **13th Agent: The Ticker Scanner**, which autonomously discovers market opportunities, feeds them to the 12-agent analysis pipeline, and sends validated trades directly to Alpaca via a Redis queue.
 
 <p align="center">
   <img src="assets/schema.png" style="width: 100%; height: auto;">
 </p>
 
-> TradingAgents framework is designed for research purposes. Trading performance may vary based on many factors, including the chosen backbone language models, model temperature, trading periods, the quality of data, and other non-deterministic factors. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
+> TradingAgents framework is designed for research purposes. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
 
-Our framework decomposes complex trading tasks into specialized roles. This ensures the system achieves a robust, scalable approach to market analysis and decision-making.
+### Autonomous Ticker Scanner (v5.0)
+- Pre-filters the market using yfinance (volume, market cap).
+- Uses a Quick-Think LLM to score and rank candidates based on catalysts and technical setups.
+- Feeds the top candidates into the deep analysis pipeline continuously.
 
 ### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
-- Sentiment Analyst: Analyzes social media and public sentiment using sentiment scoring algorithms to gauge short-term market mood.
-- News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
-- Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
-
-<p align="center">
-  <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
+- Fundamentals Analyst: Evaluates company financials and performance metrics.
+- Sentiment Analyst: Analyzes social media and public sentiment.
+- News Analyst: Monitors global news and macroeconomic indicators.
+- Technical Analyst: Utilizes technical indicators (like MACD and RSI).
 
 ### Researcher Team
-- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team. Through structured debates, they balance potential gains against inherent risks.
+- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team.
 
-<p align="center">
-  <img src="assets/researcher.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Trader Agent
-- Composes reports from the analysts and researchers to make informed trading decisions. It determines the timing and magnitude of trades based on comprehensive market insights.
-
-<p align="center">
-  <img src="assets/trader.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
+### Trader Agent & Execution Layer
+- Composes reports to make informed trading decisions.
+- Pydantic Validator enforces strict JSON schema outputs.
+- Orders are queued in **Redis** and picked up by the independent **Lumibot Executor** service.
 
 ### Risk Management and Portfolio Manager
-- Continuously evaluates portfolio risk by assessing market volatility, liquidity, and other risk factors. The risk management team evaluates and adjusts trading strategies, providing assessment reports to the Portfolio Manager for final decision.
-- The Portfolio Manager approves/rejects the transaction proposal. If approved, the order will be sent to the simulated exchange and executed.
+- Evaluates portfolio risk. If approved, the order is sent to the simulated/live exchange.
+- **Telegram Notifier** alerts the user on validation, execution, and system status.
 
-<p align="center">
-  <img src="assets/risk.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
+## Installation and Docker
 
-## Installation and CLI
+### Docker Stack (Recommended)
 
-### Installation
+Run the full autonomous system via Docker Compose:
 
-Clone TradingAgents:
 ```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
-cd TradingAgents
+git clone https://github.com/ardhanurfan/trading-bot-agent.git
+cd trading-bot-agent
+
+# Configure API Keys
+cp .env.example .env
+# Edit .env with your TELEGRAM, ALPACA, and PINECONE keys
+
+# Start the Infrastructure & Autonomous Brain
+docker compose up -d
+
+# Start the Executor (if ready for paper/live trading)
+docker compose --profile executor up -d executor
 ```
 
-Create a virtual environment in any of your favorite environment managers:
+### Manual Installation
+Create a virtual environment:
 ```bash
-conda create -n tradingagents python=3.13
-conda activate tradingagents
+python -m venv venv
+source venv/bin/activate
+pip install . httpx pinecone python-dotenv
 ```
 
-Install the package and its dependencies:
-```bash
-pip install .
-```
+## Autonomous Mode
 
-### Docker
+The system now runs as a daemon (`run_autonomous.py`) that respects US Market Hours (9:30 AM - 4:00 PM ET). 
 
-Alternatively, run with Docker:
-```bash
-cp .env.example .env  # add your API keys
-docker compose run --rm tradingagents
-```
-
-For local models with Ollama:
-```bash
-docker compose --profile ollama run --rm tradingagents-ollama
-```
+- **Scan**: Discovers 50 candidates, filters to the top 3.
+- **Analyze**: Runs the 12-agent LangGraph pipeline on each.
+- **Report**: Sends live updates to Telegram.
+- **Sleep**: Waits `SCAN_INTERVAL_MINUTES` before the next cycle.
 
 ### Required APIs
 
