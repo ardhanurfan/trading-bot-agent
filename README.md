@@ -25,7 +25,10 @@
 
 ---
 
-# TradingAgents: Multi-Agents LLM Financial Trading Framework
+# TradingAgents: Multi-Agents LLM Financial Trading Framework (Autonomous Edition)
+
+> **⚠️ Open Source Acknowledgment**  
+> This project is a heavily modified and upgraded version of the original [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents). The core 12-agent LangGraph architecture belongs to their excellent research. This repository builds upon their work by adding a **fully autonomous daemon loop, a 13th Ticker Scanner agent, Docker Compose integrations, live Telegram alerting, and Alpaca trade execution.**
 
 ## News
 - [2026-05] **TradingAgents v5.0 (Autonomous Edition)** released! Transitioned from a manual CLI tool to a fully autonomous, continuous trading daemon.
