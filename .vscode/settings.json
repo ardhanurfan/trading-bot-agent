@@ -1,0 +1,4 @@
+{
+  "tasksync.responseTimeout": "480",
+  "tasksync.sessionWarningHours": 8
+}
