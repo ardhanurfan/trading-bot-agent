@@ -47,18 +47,17 @@ class ExecutableTradeOrder(BaseModel):
 
     ticker: str = Field(
         ...,
-        pattern=r"^[A-Z]{1,5}$",
-        description="Stock ticker symbol (1-5 uppercase letters)",
+        pattern=r"^[A-Z]{2,20}(USDT|BUSD|BTC|ETH|BNB|USDC|FDUSD)$",
+        description="Binance spot pair symbol (e.g. BTCUSDT, ETHUSDT)",
     )
     side: OrderSide = Field(
         ...,
         description="Trade direction: buy, sell, or hold",
     )
-    quantity: int = Field(
+    quantity: float = Field(
         ...,
         gt=0,
-        le=10000,
-        description="Number of shares to trade (1-10000)",
+        description="Base asset quantity to trade (e.g. 0.001 BTC). Use small decimals for high-priced assets.",
     )
     limit_price: Optional[float] = Field(
         default=None,
@@ -134,7 +133,7 @@ extract the trade parameters and return ONLY a valid JSON object.
 
 Required JSON format (no markdown, no explanation):
 {{
-  "quantity": <int>,
+  "quantity": <float — base asset amount, e.g. 0.001 for BTC, 0.1 for ETH, 10.0 for ADA>,
   "limit_price": <float or null>,
   "stop_loss": <float>,
   "take_profit": <float>,
@@ -143,9 +142,10 @@ Required JSON format (no markdown, no explanation):
 }}
 
 Rules:
-- quantity must be between 1 and 10000
+- quantity is the base asset amount (crypto units), NOT USD value
+  For BTC: small fractions (e.g. 0.001–0.1), for altcoins: larger amounts are fine
 - confidence reflects how sure the analysis is (0.0 to 1.0)
-- stop_loss and take_profit must be positive numbers
+- stop_loss and take_profit must be positive numbers (price levels in quote currency)
 - If values are not mentioned, make reasonable estimates based on the analysis
 
 Portfolio Decision:

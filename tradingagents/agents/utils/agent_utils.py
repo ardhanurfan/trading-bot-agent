@@ -18,6 +18,10 @@ from tradingagents.agents.utils.news_data_tools import (
     get_insider_transactions,
     get_global_news
 )
+from tradingagents.agents.utils.crypto_on_chain_tools import (
+    get_crypto_fundamentals,
+    get_crypto_market_sentiment,
+)
 
 
 def get_language_instruction() -> str:

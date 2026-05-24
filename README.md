@@ -25,12 +25,18 @@
 
 ---
 
-# TradingAgents: Multi-Agents LLM Financial Trading Framework (Autonomous Edition)
+# TradingAgents: Multi-Agents LLM Financial Trading Framework (Crypto Edition)
 
 > **⚠️ Open Source Acknowledgment**  
-> This project is a heavily modified and upgraded version of the original [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents). The core 12-agent LangGraph architecture belongs to their excellent research. This repository builds upon their work by adding a **fully autonomous daemon loop, a 13th Ticker Scanner agent, Docker Compose integrations, live Telegram alerting, and Alpaca trade execution.**
+> This project is a heavily modified and upgraded version of the original [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents). The core 12-agent LangGraph architecture belongs to their excellent research. This repository builds upon their work by adding a **fully autonomous daemon loop, a 13th Ticker Scanner agent, Docker Compose integrations, live Telegram alerting, and Binance Spot trade execution.**
 
 ## News
+
+- [2026-06] **TradingAgents v6.0 (Crypto Edition)** released! Migrated from US stocks (yfinance + Alpaca) to **Binance Spot crypto trading**.
+  - **Binance Ticker Scanner**: Discovers crypto opportunities using real-time Binance volume + Fear & Greed index.
+  - **24/7 Continuous Daemon**: No market-hours restriction — crypto never sleeps.
+  - **Binance Executor**: Orders execute directly on Binance Spot (testnet by default, flip one env var for live).
+  - **CoinGecko Fundamentals**: Free crypto fundamental and news data (no API key required).
 - [2026-05] **TradingAgents v5.0 (Autonomous Edition)** released! Transitioned from a manual CLI tool to a fully autonomous, continuous trading daemon.
   - **Ticker Scanner Agent**: Discovers opportunities autonomously using yfinance + LLM ranking.
   - **Continuous Daemon**: Market-hours-aware scheduling loop (`run_autonomous.py`).
@@ -59,7 +65,7 @@
 
 ## TradingAgents Framework
 
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. In **v5.0**, we introduced the **13th Agent: The Ticker Scanner**, which autonomously discovers market opportunities, feeds them to the 12-agent analysis pipeline, and sends validated trades directly to Alpaca via a Redis queue.
+TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. In **v6.0 (Crypto Edition)**, the data source and execution layer have been migrated to **Binance Spot**. The system discovers crypto opportunities 24/7, runs them through the 12-agent LangGraph analysis pipeline, and sends validated trades to the Binance API via a Redis queue.
 
 <p align="center">
   <img src="assets/schema.png" style="width: 100%; height: auto;">
@@ -67,26 +73,34 @@ TradingAgents is a multi-agent trading framework that mirrors the dynamics of re
 
 > TradingAgents framework is designed for research purposes. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
 
-### Autonomous Ticker Scanner (v5.0)
-- Pre-filters the market using yfinance (volume, market cap).
-- Uses a Quick-Think LLM to score and rank candidates based on catalysts and technical setups.
-- Feeds the top candidates into the deep analysis pipeline continuously.
+### Autonomous Ticker Scanner (v6.0 — Crypto)
+
+- **Phase 0 — Macro Context**: Fetches BTC price + Fear & Greed index to determine market regime (bullish/bearish/neutral).
+- **Phase 1 — Volume Scan**: Calls Binance 24hr ticker endpoint; filters by minimum USDT volume ($10M default) and price change (3% default).
+- **Phase 2 — News Signals**: Fetches CoinGecko trending coins and cross-references with scan candidates.
+- **Phase 3 — LLM Ranking**: Scores and ranks up to 50 candidates using an LLM with macro context embedded in the prompt.
+- Feeds the top 3 candidates into the deep analysis pipeline continuously.
 
 ### Analyst Team
+
 - Fundamentals Analyst: Evaluates company financials and performance metrics.
 - Sentiment Analyst: Analyzes social media and public sentiment.
 - News Analyst: Monitors global news and macroeconomic indicators.
 - Technical Analyst: Utilizes technical indicators (like MACD and RSI).
 
 ### Researcher Team
+
 - Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team.
 
 ### Trader Agent & Execution Layer
+
 - Composes reports to make informed trading decisions.
-- Pydantic Validator enforces strict JSON schema outputs.
-- Orders are queued in **Redis** and picked up by the independent **Lumibot Executor** service.
+- Pydantic Validator enforces strict JSON schema outputs with Binance pair format (`BTCUSDT`, `ETHUSDT`, etc.).
+- Orders are queued in **Redis** and picked up by the independent **Binance Executor** service.
+- Testnet mode is **on by default** — set `BINANCE_TESTNET=false` only when ready for live trading.
 
 ### Risk Management and Portfolio Manager
+
 - Evaluates portfolio risk. If approved, the order is sent to the simulated/live exchange.
 - **Telegram Notifier** alerts the user on validation, execution, and system status.
 
@@ -102,17 +116,20 @@ cd trading-bot-agent
 
 # Configure API Keys
 cp .env.example .env
-# Edit .env with your TELEGRAM, ALPACA, and PINECONE keys
+# Edit .env — required: LLM key + BINANCE_API_KEY + BINANCE_SECRET_KEY
+# BINANCE_TESTNET=true is the default (safe for testing)
 
 # Start the Infrastructure & Autonomous Brain
 docker compose up -d
 
-# Start the Executor (if ready for paper/live trading)
+# Start the Binance Executor (testnet by default)
 docker compose --profile executor up -d executor
 ```
 
 ### Manual Installation
+
 Create a virtual environment:
+
 ```bash
 python -m venv venv
 source venv/bin/activate
@@ -121,10 +138,11 @@ pip install . httpx pinecone python-dotenv
 
 ## Autonomous Mode
 
-The system now runs as a daemon (`run_autonomous.py`) that respects US Market Hours (9:30 AM - 4:00 PM ET). 
+The system now runs as a daemon (`run_autonomous.py`) **24/7** — crypto markets never close.
 
-- **Scan**: Discovers 50 candidates, filters to the top 3.
+- **Scan**: Queries Binance for top-volume USDT pairs + Fear & Greed index. Filters to top 3 candidates.
 - **Analyze**: Runs the 12-agent LangGraph pipeline on each.
+- **Execute**: Validated orders go to Binance Spot (testnet by default).
 - **Report**: Sends live updates to Telegram.
 - **Sleep**: Waits `SCAN_INTERVAL_MINUTES` before the next cycle.
 
@@ -141,14 +159,33 @@ export DEEPSEEK_API_KEY=...        # DeepSeek
 export DASHSCOPE_API_KEY=...       # Qwen (Alibaba DashScope)
 export ZHIPU_API_KEY=...           # GLM (Zhipu)
 export OPENROUTER_API_KEY=...      # OpenRouter
-export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
 ```
+
+**Binance API Setup (required for crypto trading):**
+
+1. Go to [Binance API Management](https://www.binance.com/en/my/settings/api-management)
+2. Create a new API key → Enable **Read** + **Trade** permissions
+3. Do **NOT** enable Withdrawal
+4. Set an IP whitelist for production security
+5. For testnet: create a separate key at [testnet.binance.vision](https://testnet.binance.vision)
+
+```bash
+export BINANCE_API_KEY=your_key
+export BINANCE_SECRET_KEY=your_secret
+export BINANCE_TESTNET=true    # Switch to false only for live trading
+```
+
+**Free APIs (no key required):**
+
+- [CoinGecko API](https://www.coingecko.com/en/api) — crypto fundamentals and trending coins
+- [Alternative.me Fear & Greed](https://alternative.me/crypto/fear-and-greed-index/) — market sentiment
 
 For enterprise providers (e.g. Azure OpenAI, AWS Bedrock), copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
 
 For local models, configure Ollama with `llm_provider: "ollama"` in your config.
 
 Alternatively, copy `.env.example` to `.env` and fill in your keys:
+
 ```bash
 cp .env.example .env
 ```
@@ -156,10 +193,12 @@ cp .env.example .env
 ### CLI Usage
 
 Launch the interactive CLI:
+
 ```bash
 tradingagents          # installed command
 python -m cli.main     # alternative: run directly from source
 ```
+
 You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
 
 <p align="center">
@@ -252,16 +291,16 @@ Past contributions, including code, design feedback, and bug reports, are credit
 
 ## Citation
 
-Please reference our work if you find *TradingAgents* provides you with some help :)
+Please reference our work if you find _TradingAgents_ provides you with some help :)
 
 ```
 @misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework}, 
+      title={TradingAgents: Multi-Agents LLM Financial Trading Framework},
       author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
       year={2025},
       eprint={2412.20138},
       archivePrefix={arXiv},
       primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138}, 
+      url={https://arxiv.org/abs/2412.20138},
 }
 ```

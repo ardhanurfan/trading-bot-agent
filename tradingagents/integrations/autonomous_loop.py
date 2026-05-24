@@ -1,15 +1,15 @@
 """Autonomous continuous trading loop.
 
-Runs the full TradingAgents pipeline in a daemon-like loop during US
-market hours.  Each cycle:
+Runs the full TradingAgents pipeline in a daemon-like loop.
+Crypto markets trade 24/7 — no market-hours gate.
+
+Each cycle:
 
     1. Scan market for candidates (TickerScanner)
     2. Run deep analysis on top N (TradingAgentsGraph.propagate)
     3. Validate + queue orders (Redis → Executor)
     4. Report via Telegram
     5. Sleep until next interval
-
-Market hours: 9:30 AM – 4:00 PM Eastern (configurable).
 """
 
 from __future__ import annotations
@@ -114,19 +114,18 @@ class AutonomousLoop:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        """Main daemon loop — runs continuously until shutdown."""
-        logger.info("Autonomous trading loop started")
+        """Main daemon loop — runs continuously until shutdown.
+
+        Crypto markets operate 24/7 so there is no market-hours gate.
+        Every scan interval a full scan → analyze → report cycle is executed.
+        """
+        logger.info("Autonomous trading loop started (24/7 crypto mode)")
         self._send_boot_message()
 
         while self._running:
             try:
-                if self._is_market_hours():
-                    self._run_scan_cycle()
-                    self._sleep_until_next_scan()
-                elif self._is_weekday():
-                    self._wait_for_market_open()
-                else:
-                    self._wait_for_weekday()
+                self._run_scan_cycle()
+                self._sleep_until_next_scan()
             except KeyboardInterrupt:
                 break
             except Exception:

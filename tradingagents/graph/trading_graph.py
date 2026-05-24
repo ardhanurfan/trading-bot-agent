@@ -8,7 +8,13 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
 
-import yfinance as yf
+# yfinance is optional — used for stock tickers; crypto uses Binance klines
+try:
+    import yfinance as yf
+    _YFINANCE_AVAILABLE = True
+except ImportError:
+    _YFINANCE_AVAILABLE = False
+    yf = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +43,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_news,
     get_insider_transactions,
-    get_global_news
+    get_global_news,
+    get_crypto_fundamentals,
+    get_crypto_market_sentiment,
 )
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
@@ -216,19 +224,70 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
+                    # Crypto on-chain and market sentiment tools
+                    get_crypto_fundamentals,
+                    get_crypto_market_sentiment,
                 ]
             ),
         }
+
+    def _is_crypto_ticker(self, ticker: str) -> bool:
+        """Return True if ticker is a crypto pair (e.g. BTCUSDT, SOLUSDT)."""
+        crypto_suffixes = ("USDT", "BUSD", "BTC", "ETH", "BNB", "USDC", "FDUSD")
+        return any(ticker.upper().endswith(s) for s in crypto_suffixes)
+
+    def _fetch_crypto_returns(
+        self, ticker: str, trade_date: str, holding_days: int = 5
+    ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+        """Fetch return for a crypto pair using Binance klines.
+
+        Benchmark: BTCUSDT (unless the ticker IS BTC, then use ETHUSDT).
+        Returns (raw_return, alpha_return, actual_holding_days).
+        """
+        try:
+            from tradingagents.dataflows.binance_client import BinanceClient
+            client = BinanceClient()
+
+            # Determine benchmark
+            benchmark = "ETHUSDT" if ticker.upper() == "BTCUSDT" else "BTCUSDT"
+
+            # Fetch daily klines covering holding period
+            limit = holding_days + 10
+            ticker_klines = client.get_klines(symbol=ticker, interval="1d", limit=limit)
+            bench_klines = client.get_klines(symbol=benchmark, interval="1d", limit=limit)
+
+            if len(ticker_klines) < 2 or len(bench_klines) < 2:
+                return None, None, None
+
+            actual_days = min(holding_days, len(ticker_klines) - 1, len(bench_klines) - 1)
+            # kline[4] = close price
+            raw = (float(ticker_klines[actual_days][4]) - float(ticker_klines[0][4])) / float(ticker_klines[0][4])
+            bench_ret = (float(bench_klines[actual_days][4]) - float(bench_klines[0][4])) / float(bench_klines[0][4])
+            alpha = raw - bench_ret
+            return raw, alpha, actual_days
+        except Exception as exc:
+            logger.warning("Crypto return fetch failed for %s on %s: %s", ticker, trade_date, exc)
+            return None, None, None
 
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5
     ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
+        Automatically routes to Binance klines for crypto tickers or yfinance
+        for traditional equities.
+
         Returns (raw_return, alpha_return, actual_holding_days) or
-        (None, None, None) if price data is unavailable (too recent, delisted,
-        or network error).
+        (None, None, None) if price data is unavailable.
         """
+        if self._is_crypto_ticker(ticker):
+            return self._fetch_crypto_returns(ticker, trade_date, holding_days)
+
+        # Stock path — uses yfinance (SPY benchmark)
+        if not _YFINANCE_AVAILABLE:
+            logger.warning("yfinance not installed — cannot fetch stock returns for %s", ticker)
+            return None, None, None
+
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays

@@ -1,16 +1,16 @@
-"""TradingAgents — Autonomous Trading Daemon.
+"""TradingAgents — Autonomous Crypto Trading Daemon.
 
-Runs continuously during US market hours. The system:
-  1. Scans the market for promising stocks (Ticker Scanner Agent)
-  2. Runs full 12-agent analysis on top candidates
-  3. Validates and queues orders via Redis → Alpaca
+Runs 24/7 (crypto never closes). The system:
+  1. Scans the crypto market for promising pairs (Ticker Scanner Agent)
+  2. Runs full 12-agent analysis on top candidates (BTC, ETH, altcoins)
+  3. Validates and queues orders via Redis → Binance Spot
   4. Reports everything via Telegram
 
 The user does NOT pick tickers — the system discovers them autonomously.
 
 Usage:
-    python run_autonomous.py                                      # Local
-    docker compose run tradingagents python run_autonomous.py      # Docker
+    python run_autonomous.py                                       # Local
+    docker compose run tradingagents python run_autonomous.py       # Docker
 
 Configuration:
     All settings in tradingagents/default_config.py or via .env
